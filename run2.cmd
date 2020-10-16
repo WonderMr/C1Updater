@@ -1,9 +1,12 @@
 powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
--TargetBase targetbates ^
+-TargetBase targetbase ^
 -TargetBaseServer targetserv ^
 -TargetBasePort 1541 ^
 -TargetBaseAgentPort 1540 ^
 -PermissionCode 123 ^
 -ApplyCFPath "c:\temp\1Cv8_demo.cf" ^
+-ConfigurationRepositoryF tcp://server:port/repo_name
+-ConfigurationRepositoryN repo_user
+-ConfigurationRepositoryP repo_pwd
+-Extension repo_ext
 -UpdateByClientInTheEnd 1
-rem -BaseUser 
