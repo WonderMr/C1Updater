@@ -32,7 +32,7 @@
   UpdateByClientInTheEnd                # /C ЗапуститьОбновлениеИнформационнойБазы
  ```
 ## Примеры запуска:
-#### Обновление базы basename на сервере serv конфигурацией из файла ApplyCFPath c:\1C\1cfv.cf под именем user с паролем pwd. База блокируется кодом 1, перед обновлением выполняется внешняя обработка отключения РИБ DistributedInfoBase_OFF.epf, после обновления - обработка c:\1C\DistributedInfoBase_ON.epf подключет РИБ
+Обновление базы basename на сервере serv конфигурацией из файла ApplyCFPath c:\1C\1cfv.cf под именем user с паролем pwd. База блокируется кодом 1, перед обновлением выполняется внешняя обработка отключения РИБ DistributedInfoBase_OFF.epf, после обновления - обработка c:\1C\DistributedInfoBase_ON.epf подключет РИБ
  ```
  powershell.exe -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBase basename ^
@@ -47,7 +47,7 @@
 -BaseUserPass pwd
 ```
 
-#### Обновление расширения repo_ext в базе targetbase на сервере targetserv из привязанного к базе хранилища tcp://server:port/repo_name под именем repo_user и паролем repo_pwd. После применения конфигурации запускаем БСПшные обработчики обновления в конфигурации.
+Обновление расширения repo_ext в базе targetbase на сервере targetserv из привязанного к базе хранилища tcp://server:port/repo_name под именем repo_user и паролем repo_pwd. После применения конфигурации запускаем БСПшные обработчики обновления в конфигурации.
 ```
 powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBase targetbase ^
