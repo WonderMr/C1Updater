@@ -160,7 +160,7 @@ function disableUnsafeActions{
             Move-Item $conf_filename_backup $conf_filename
         }        
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"
+        log_w "Got Exception on disabling unsafe actions `r`n$_"
     }    
 }
 
@@ -196,8 +196,8 @@ function GetInfoBase{
             }            
         }    
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"
-        exit 7
+        log_w "Got Exception on GetInfoBase `r`n$_"
+        Exit 7
     }    
 }
 
@@ -219,8 +219,8 @@ function GetScheduledJobsDeniedState{
                                                                     -BBBasePass         $BBBasePass)[1]
         return $gsjds_base.ScheduledJobsDenied
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"
-        exit 8
+        log_w "Got Exception while getting job state `r`n$_"
+        Exit 8
     }
 }
 
@@ -265,8 +265,8 @@ function LockBase{
         #}
         return false
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"
-        exit 9
+        log_w "Got Exception while locking base `r`n$_"
+        Exit 9
     }
 }
 function UnlockBase{
@@ -298,13 +298,13 @@ function UnlockBase{
                 $Global:WPConnection.UpdateInfoBase($Global:Base)
                 return $true
             } catch [System.Exception]{
-                log_w "Got Exception: `r`n$_"
+                log_w "Got Exception on SessionsDenied`r`n$_"
             }
         #}
         return $false
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"
-        exit 10
+        log_w "Got Exception on unlock `r`n$_"
+        Exit 10
     }
 }
 function KillSession{
@@ -329,7 +329,7 @@ function KillSession{
         }
         return $true
     }catch [System.Exception]{
-        log_w "Got Exception: `r`n$_"        
+        log_w "Got Exception while kill session `r`n$_"
         Exit 11
     }
 }
@@ -383,12 +383,14 @@ function main{
     log_w "Целевая база расположена         =   $TargetBaseServer`:$TargetBasePort"
     if(!$BaseUser){ 
         $BaseUser                           =   ""
-        log_w "Имя пользователя не указано"
+        log_w "Имя пользователя не указано, используется доменная авторизация"
     }else{
         log_w `
           "Подключаемся под пользователем   =   $BaseUser"
     }
-    if(!$BaseUserPass){ $BaseUserPass       =   ""}
+    if(!$BaseUserPass){
+        $BaseUserPass                       =   ""
+    }
     if($ApplyCFPath){
         log_w "Загружаем конфигурацию из файла $ApplyCFPath"
         if($ConfigurationRepositoryF){
@@ -468,32 +470,28 @@ function main{
         Exit 13
     }
 
-
     $rand                                   =   Get-Random
     $log1C_file                             =   (split-path $MyInvocation.PSCommandPath -Leaf)+"."+$rand+".1c.log"
+    if($BaseUser){
+        $auth                               =   " /N`"$BaseUser`" /P`"$BaseUserPass`" "
+    }else{
+        $auth                               =   ""
+    }
     $main_part                              =   "/S`"$TargetBaseServer`:$TargetBasePort`\$TargetBase`" `
                                                 /UC$PermissionCode`
-                                                /N`"$BaseUser`" /P`"$BaseUserPass`"`
+                                                $auth`
                                                 /DisableStartupMessages`
                                                 /Out`"$log1C_file`""
     $close_1c_workload                      =   (split-path $MyInvocation.PSCommandPath -Leaf)+".close1c.epf"
-    $load_cfg                               =   "DESIGNER   $main_part /LoadCfg`"$ApplyCFPath`" $Extension /UpdateCfg -force" -replace "\s+"," "
-    $update_cfg                             =   "DESIGNER   $main_part /UpdateDBCfg" -replace "\s+"," "
+    $load_update_cfg                        =   "DESIGNER   $main_part /LoadCfg `"$ApplyCFPath`" $Extension /UpdateDBCfg" -replace "\s+"," "
     $applyWorkloadBefore                    =   "ENTERPRISE $main_part /Execute`"$WorkloadBeforeUpdatePath`"" -replace "\s+"," "
     $applyWorkloadAfter                     =   "ENTERPRISE $main_part /Execute`"$WorkloadAfterUpdatePath`"" -replace "\s+"," "
     $update_by_client                       =   "ENTERPRISE $main_part /C`"ЗапуститьОбновлениеИнформационнойБазы ВыполнитьОтложенноеОбновлениеСейчас ЗавершитьРаботуСистемы`" /Execute`"$close_1c_workload`"" -replace "\s+"," "
     $update_cfg_from_repo                   =   "DESIGNER   $main_part /ConfigurationRepositoryUpdateCfg -revised -force $Extension `
                                                 /ConfigurationRepositoryF`"$ConfigurationRepositoryF`" `
                                                 /ConfigurationRepositoryN`"$ConfigurationRepositoryN`" `
-                                                /ConfigurationRepositoryP`"$ConfigurationRepositoryP`" " -replace "\s+"," "
+                                                /ConfigurationRepositoryP`"$ConfigurationRepositoryP`" /UpdateDBCfg" -replace "\s+"," "
         
-    # log_w "Пусть полежит для отладки"
-    # log_w "$run1c $load_cfg"
-    # log_w "$run1c $update_cfg"
-    # log_w "$run1c $applyWorkloadBefore"
-    # log_w "$run1c $applyWorkloadAfter"
-    # log_w "$run1c $update_cfg_from_repo"
-    # log_w "$run1c $update_by_client"
     # отключаем обработку опасных действий, если будем использовать обработки
     if ($UpdateByClientInTheEnd -or $WorkloadBeforeUpdatePath -or $WorkloadAfterUpdatePath){
         $unsafeActionsApplied               =   enableUnsafeActions $conf_cfg
@@ -504,23 +502,19 @@ function main{
         run_me -run_exe $run1c -run_args $applyWorkloadBefore -log_text "Executing $run1c $applyWorkloadBefore" -log_file $log1C_file
         log_w "Ну, значит. Подготовились с помощью $WorkloadBeforeUpdatePath"
     }
-    # 4.Обновление
+    # 4.Обновление и применение конфы
     if($ConfigurationRepositoryF){
-        # 4.2 Обновление из хранилища
+        # 4.2 Обновление и применение конфы из хранилища
         log_w "Processing $update_cfg_from_repo"
-        run_me -run_exe $run1c -run_args $update_cfg_from_repo -log_text "Обновляю конфигурацию из хранилища $run1c $update_cfg_from_repo" -log_file $log1C_file
+        run_me -run_exe $run1c -run_args $update_cfg_from_repo -log_text "Обновляю и применяю конфигурацию из хранилища $run1c $update_cfg_from_repo" -log_file $log1C_file
         log_w "Сам от себя такого не ожидал."
     }
     if($ApplyCFPath){
-        # 4.1 Обновление из файла конфигурации
-        log_w "Processing $load_cfg"
-        run_me -run_exe $run1c -run_args $load_cfg -log_text "Загружаю конфигурацию $ApplyCFPath" -log_file $log1C_file
+        # 4.1 Обновление и применение конфы из файла
+        log_w "Processing $load_update_cfg"
+        run_me -run_exe $run1c -run_args $load_update_cfg -log_text "Загружаю и применяю конфигурацию из $ApplyCFPath" -log_file $log1C_file
         log_w "Пока всё идёт по плану."
     }
-    # 4.2 Применение новой конфигурации
-    log_w "Processing $update_cfg"
-    run_me -run_exe $run1c -run_args $update_cfg -log_text "Применяю конфигурацию базы данных" -log_file $log1C_file
-    log_w "Да, я действительно так хорош."
     # 5.Выполнение после обновления
     if($WorkloadAfterUpdatePath){
         log_w "Processing $applyWorkloadAfter"
@@ -552,7 +546,7 @@ function main{
         Exit 0
     }else{
         log_w "Неееееееееееееееееет, такой фейл на последнем метре... Надо звать человеков на помощь"
-        Exit 13
+        Exit 14
     }
 }
 main
