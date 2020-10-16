@@ -14,8 +14,8 @@
   9. **После обновления** разблокирует базу
 ### Список всех параметров
 ```
- TargetBase                            # имя целевой базы для обновления
- TargetBaseServer                      # имя сервера целевой базы для обновления
+  TargetBase                            # имя целевой базы для обновления
+  TargetBaseServer                      # имя сервера целевой базы для обновления
   TargetBasePort                        # порт сервера целевой базы, если отличается от стандартного то 1541
   TargetBaseAgentPort                   # порт агента сервера целевой базы, если отличается от стандартного то 1540
   PermissionCode                        # код разрешения доступа, если не указан, то устанавливается произвольный
@@ -33,7 +33,8 @@
  ```
 ## Примеры запуска:
 ### Обновление базы basename на сервере serv конфигурацией из файла ApplyCFPath c:\1C\1cfv.cf под именем user с паролем pwd. База блокируется кодом 1, перед обновлением выполняется внешняя обработка отключения РИБ DistributedInfoBase_OFF.epf, после обновления - обработка c:\1C\DistributedInfoBase_ON.epf подключет РИБ
- ```powershell.exe -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
+ ```
+ powershell.exe -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBase basename ^
 -TargetBaseServer serv ^
 -TargetBasePort 1541 ^
@@ -47,7 +48,8 @@
 ```
 
 ### Обновление расширения repo_ext в базе targetbase на сервере targetserv из привязанного к базе хранилища tcp://server:port/repo_name под именем repo_user и паролем repo_pwd. После применения конфигурации запускаем БСПшные обработчики обновления в конфигурации.
-```powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
+```
+powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBase targetbase ^
 -TargetBaseServer targetserv ^
 -TargetBasePort 1541 ^
