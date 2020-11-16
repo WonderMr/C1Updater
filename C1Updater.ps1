@@ -14,7 +14,10 @@ Param(
         $ConfigurationRepositoryP,              # пароль пользователя хранилища конфигурации
         $Extension,                             # имя расширения хранилища конфигурации
         $ConfigurationRepositoryExtension,      # для совместимости        
-        $UpdateByClientInTheEnd                 # /C ЗапуститьОбновлениеИнформационнойБазы
+        $UpdateByClientInTheEnd,                # /C ЗапуститьОбновлениеИнформационнойБазы
+        $UseRAServer,                           # Использовать не ком-соединение, а rac
+        $LockMessage,                           # Сообщение, используемое для блокировки базы 1С
+        $C1Files                                # Каталог для используемой версии 1С
     )
 
 function detect_1c{
@@ -82,8 +85,8 @@ function Invoke-Process {
             NoNewWindow                         =   $true;
         }
         $cmd                                    =   Start-Process @startProcessParams
-        $cmdOutput                              =   Get-Content -Path $stdOutTempFile
-        $cmdError                               =   Get-Content -Path $stdErrTempFile
+        $cmdOutput                              =   Get-Content -Path $stdOutTempFile -Raw
+        $cmdError                               =   Get-Content -Path $stdErrTempFile -Raw
         if ($cmd.ExitCode -ne 0) {
             return $cmd.ExitCode,$cmdError
         }else{
@@ -119,12 +122,14 @@ function chk4fileParam{
         $ParamValue,
         $ParamName
     )
+    $ParamValue                                 =   $ParamValue -replace "[""]+","" -replace """",""
     if($ParamValue){
         if (!(Test-Path $ParamValue)){
-            log_w "Некорректный параметр $ParamName"
+            log_w "Некорректный параметр $ParamName со значением $ParamValue"
             Exit 6
         }
     }
+    return $true
 }
 function enableUnsafeActions{
     param (
@@ -146,7 +151,6 @@ function enableUnsafeActions{
     }    
     return $false
 }
-
 function disableUnsafeActions{
     param (
         $conf_filename
@@ -163,7 +167,6 @@ function disableUnsafeActions{
         log_w "Got Exception on disabling unsafe actions `r`n$_"
     }    
 }
-
 function GetInfoBase{
     param(
         $BBBase,
@@ -200,7 +203,6 @@ function GetInfoBase{
         Exit 7
     }    
 }
-
 function GetScheduledJobsDeniedState{
     param(
         $BBBase,
@@ -210,20 +212,87 @@ function GetScheduledJobsDeniedState{
         $BBBaseUser,
         $BBBasePass
     )
-    try{
-        $gsjds_base                             =   (GetInfoBase    -BBBase             $BBBase `
+    if($global:UseRAServer){
+        #get sheduled jobs status
+        $srv_ib                                 =   racGetInfobaseGUID  -rgig_srv       $global:UseRAServer `
+                                                                        -rgig_ib_name   $BBBase `
+                                                                        -rgig_user_name $BBBaseUser `
+                                                                        -rgig_user_pass $BBBasePass
+        $c_infb_info                            =   "infobase info $srv_ib"
+        try {    
+            $gsjds_ret                          =   (Invoke-Process -FilePath $global:rac -ArgumentList $c_infb_info)
+            $sch_j_locks                        =   ($gsjds_ret[1] | Select-String -Pattern $global:rx_infb_sch_j)
+            $sch_j_lock                         =   $sch_j_locks.Matches[0].Groups[1].Value
+            log_w "Scheduled jobs lock state is $sch_j_lock"
+            return $sch_j_lock
+        } catch {
+            log_w "get scheduled jobs lock state error $_"
+            exit(1)
+        }        
+    }else {
+        try{
+            $gsjds_base                         =   (GetInfoBase    -BBBase             $BBBase `
                                                                     -BBpermissionCode   $BBpermissionCode  `
                                                                     -BBServer           $BBServer `
                                                                     -BBAgentPort        $BBAgentPort `
                                                                     -BBBaseUser         $BBBaseUser `
                                                                     -BBBasePass         $BBBasePass)[1]
-        return $gsjds_base.ScheduledJobsDenied
-    }catch [System.Exception]{
-        log_w "Got Exception while getting job state `r`n$_"
-        Exit 8
+            $state                              =   $gsjds_base.ScheduledJobsDenied                                                                    
+            log_w "Scheduled jobs lock state is $state"
+            return $state
+        }catch [System.Exception]{
+            log_w "Got Exception while getting job state `r`n$_"
+            Exit 8
+        }
     }
 }
-
+function LockBaseByRac {
+    param (
+        $BBBase,
+        $BBServer,
+        $BBpermissionCode,
+        $BBBaseUser,
+        $BBBasePass
+    )
+    $srv_ib                                 =   racGetInfobaseGUID  -rgig_srv       $BBServer `
+                                                                    -rgig_ib_name   $BBBase `
+                                                                    -rgig_user_name $BBBaseUser `
+                                                                    -rgig_user_pass $BBBasePass
+    $c_infb_lock                            =   "infobase update `
+                                                --denied-from `""+($global:lockfrom -replace "T"," ")+"`" `
+                                                --denied-to   `""+($global:lockto   -replace "T"," ")+"`" `
+                                                --denied-message ""$global:lockmessage""`
+                                                --permission-code  $BBpermissionCode`
+                                                --sessions-deny=on `
+                                                --scheduled-jobs-deny=on`
+                                                $srv_ib" `
+                                                -replace "\s{2,}"," "
+    $lbbr_ret                               =   Invoke-Process $Global:rac $c_infb_lock
+    log_w "Блокировка базы завершена: $lbbr_ret"
+    return $lbbr_ret
+}
+function UnLockBaseByRac {
+    param (
+        $BBBase,
+        $BBServer,
+        $BBpermissionCode,
+        $BBBaseUser,
+        $BBBasePass,
+        $BBUnlockJobs
+    )
+    $srv_ib                                 =   racGetInfobaseGUID  -rgig_srv       $BBServer `
+                                                                    -rgig_ib_name   $BBBase `
+                                                                    -rgig_user_name $BBBaseUser `
+                                                                    -rgig_user_pass $BBBasePass
+    $c_infb_ulock                           =   "infobase update `
+                                                --sessions-deny=off`
+                                                --scheduled-jobs-deny=$BBUnlockJobs `
+                                                $srv_ib" `
+                                                -replace "\s{2,}"," "                                                                    
+    $ulbbr_ret                              =   Invoke-Process $Global:rac $c_infb_ulock
+    log_w "База успешно разблокирована. Блокировка регламентных заданий = $BBUnlockJobs"
+    return $ulbbr_ret
+}
 function LockBase{    
     param(
         $BBBase,
@@ -233,6 +302,15 @@ function LockBase{
         $BBBaseUser,
         $BBBasePass
     )
+    if($global:UseRAServer){
+        LockBaseByRac                           -BBBase             $BBBase `
+                                                -BBpermissionCode   $BBpermissionCode  `
+                                                -BBServer           $global:UseRAServer `
+                                                -BBBaseUser         $BBBaseUser `
+                                                -BBBasePass         $BBBasePass
+        log_w "Заблокировал базу при помощи RAC/RAS. Код скажу только тебе, он = $BBpermissionCode"
+        return $true
+    }
     try{
         if(!$Global:magic){
             $Global:magic                       =   (GetInfoBase    -BBBase             $BBBase `
@@ -251,14 +329,12 @@ function LockBase{
             }else{
                 log_w "Пусть я и остался анонимен, но в базу вошёл. Потому что там вообще нет пользователей!"
             }
-            $lockfrom                           =   getDateString(get-date)
-            $Global:Base.DeniedFrom             =   $lockfrom
-            $lockto                             =   getDateString((get-date).AddDays(1))
-            $Global:Base.DeniedTo               =   $lockto
-            $Global:Base.DeniedMessage          =   "База заблокирована для обновления"
+            $Global:Base.DeniedFrom             =   $global:lockfrom
+            $Global:Base.DeniedTo               =   $global:lockto
+            $Global:Base.DeniedMessage          =   $global:LockMessage
             $Global:Base.SessionsDenied         =   $true
             $Global:Base.ScheduledJobsDenied    =   $true
-            $Global:Base.PermissionCode         =   $BBpermissionCode           
+            $Global:Base.PermissionCode         =   $BBpermissionCode
             $Global:WPConnection.UpdateInfoBase($Global:Base)
             log_w "Пока я работаю, в базе больше не будет работать никто. Я всех заблокировал. И фоновые задания тоже. Код скажу только тебе, он = $BBpermissionCode"
             return $true
@@ -279,7 +355,17 @@ function UnlockBase{
         $BBBasePass,
         $BBUnlockJobs
     )
-    try{                
+    try{          
+        if($global:UseRAServer){
+            UnLockBaseByRac                         -BBBase             $BBBase `
+                                                    -BBpermissionCode   $BBpermissionCode  `
+                                                    -BBServer           $global:UseRAServer `
+                                                    -BBBaseUser         $BBBaseUser `
+                                                    -BBBasePass         $BBBasePass `
+                                                    -BBUnlockJobs       $BBUnlockJobs
+            log_w "Разблокировал базу с помощью RAC/RAS"
+            return $true
+        }              
         if(!$Global:magic){
             $Global:magic                       =   (GetInfoBase    -BBBase             $BBBase `
                                                                     -BBpermissionCode   $BBpermissionCode  `
@@ -307,12 +393,72 @@ function UnlockBase{
         Exit 10
     }
 }
+function KillUsersByRac {
+    param (
+        $BBBase,
+        $BBServer,
+        $BBBaseUser,
+        $BBBasePass
+    )
+    $reason                                 =   "--error-message ""$global:lock_message"""
+    $srv                                    =   racGetClusterGUID   -rgs_srv        $BBServer
+    $srv_ib                                 =   racGetInfobaseGUID  -rgig_srv       $BBServer `
+                                                                    -rgig_ib_name   $BBBase `
+                                                                    -rgig_user_name $BBBaseUser `
+                                                                    -rgig_user_pass $BBBasePass
+    #get session list
+    $c_sesn_list                            =   "session list $srv_ib"
+    try {
+        $sesns                              =   Invoke-Process $global:rac $c_sesn_list
+        ($sesns | Select-String -AllMatches -Pattern $global:rx_sesn_guid).Matches |
+        ForEach-Object{
+            if($_ -ne $null){
+                $guid                       =   $_.Groups[1].Value
+                write-host "killing session $guid"                
+                Invoke-Process $global:rac "session terminate --session $guid $reason $srv"
+            }else{
+                write-host "guid is undefined while session termination"
+            }
+        }
+    }catch {
+        Write-Host "get session list error $_"
+        exit(1)
+    }
+    #----------------------
+    #get connection list
+    $c_conn_list                            =   "connection list $srv_ib"
+    try {
+        $conns                              =   Invoke-Process $global:rac $c_conn_list
+        ($conns | Select-String -AllMatches -Pattern $global:rx_sspr_guids).Matches |
+        ForEach-Object{
+            if($_ -ne $null){
+                $conn_guid                  =   $_.Groups[1].Value
+                $prcs_guid                  =   $_.Groups[2].Value
+                write-host "disconnectiong connection $conn_guid in process $prcs_guid"
+                Invoke-Process $global:rac "connection disconnect --connection $conn_guid --process $prcs_guid $srv"
+            }else{
+                write-host "guid is undefined while session termination"
+            }
+        }
+    } catch {
+        Write-Host "get sessions list error $_"
+        exit(16)
+    }
+}
 function KillSession{
     param(
         $BBBase,
         $BBConnectionString
     )
-    try{
+    if($global:UseRAServer){
+        KillUsersByRac                          -BBBase             $BBBase `
+                                                -BBServer           $global:UseRAServer `
+                                                -BBBaseUser         $BBBaseUser `
+                                                -BBBasePass         $BBBasePass
+        log_w "Удалил из базы все сеансы и соединений"
+        return $true
+    }    
+    try{        
         if(!($Global:Agent)){
             $Global:Agent                       =   $global:COM.ConnectAgent($BBConnectionString)
             $Global:Cluster                     =   $Global:Agent.GetClusters()
@@ -333,15 +479,74 @@ function KillSession{
         Exit 11
     }
 }
-function getDateString{
-    param($cd)
-    $dd                                         =   if(([string]$cd.Day).Length -gt 1){$cd.Day}else{"0"+$cd.Day} 
-    $y                                          =   $cd.Year
-    $m                                          =   if(([string]$cd.Month).Length -gt 1){$cd.Month}else{"0"+$cd.Month}
-    $hr                                         =   if(([string]$cd.Hour).Length -gt 1){$cd.Hour}else{"0"+$cd.Month}
-    $mnt                                        =   if(([string]$cd.Minute).Length -gt 1){$cd.Minute}else{"0"+$cd.Minute}
-    $sec                                        =   if(([string]$cd.Second).Length -gt 1){$cd.Second}else{"0"+$cd.Second}
-    return "$y-$m-$dd $hr`:$mnt`:$sec"
+function getDateString($cd,$t=$null){
+    $dd                                     =   if(([string]$cd.Day).Length -gt 1){$cd.Day}else{"0"+$cd.Day} 
+    $y                                      =   $cd.Year
+    $m                                      =   if(([string]$cd.Month).Length -gt 1){$cd.Month}else{"0"+$cd.Month}
+    $hr                                     =   if(([string]$cd.Hour).Length -gt 1){$cd.Hour}else{"0"+$cd.Month}
+    $mnt                                    =   if(([string]$cd.Minute).Length -gt 1){$cd.Minute}else{"0"+$cd.Minute}
+    $sec                                    =   if(([string]$cd.Second).Length -gt 1){$cd.Second}else{"0"+$cd.Second}
+    if(!$t){
+        $t                                  =   " "
+    }
+    return "$y-$m-$dd$t$hr`:$mnt`:$sec"
+}
+function racAuth ($r_user,$r_pass){    
+    if($r_user){
+        return $db_auth                     =   " --db-user ""$r_user"" --db-pwd ""$r_pass"""
+    } else {
+            return ""
+    }
+}
+function racGetClusterGUID($rgs_srv){
+    if($global:cluster_guid){
+        return $global:cluster_guid
+    }
+    $c_clst_list                                =   "cluster list $rgs_srv"
+    try {
+        $rgcg_ret                               =   Invoke-Process ($global:rac) $c_clst_list
+        $clusters                               =   ($rgcg_ret | Select-String -Pattern ($global:rx_guid))
+        $cluster                                =   $clusters.Matches[0].Value
+        log_w "rac working with $rgs_srv"
+        $global:cluster_guid                    =   "--cluster $cluster $rgs_srv"
+        return $global:cluster_guid
+    } catch {
+        log_w "get cluster guid error $_"
+        exit(1)
+    }
+}
+function racGetInfobaseGUID{
+    param(
+        $rgig_srv,
+        $rgig_ib_name,
+        $rgig_user_name,
+        $rgig_user_pass
+    )
+    if($global:srv_ib){
+        return $global:srv_ib
+    }
+    if($rgig_user_name){
+        $db_auth                                =   "--db-user ""$rgig_user_name"" --db-pwd ""$rgig_user_pass"""
+    } else {
+        $db_auth                                =   ""
+    }
+    
+    $srv                                        =   racGetClusterGUID $rgig_srv
+    #get infobase guid
+    $c_ifbs_list                                =   "infobase summary list $srv"
+    try {
+        $rgig_ret                               =   Invoke-Process $global:rac $c_ifbs_list
+        $global:rx_ib_guid                      =   $global:rx_ib_guid_part+$rgig_ib_name
+        $ib_guids                               =   ($rgig_ret | Select-String -Pattern $global:rx_ib_guid)
+        $ib_guid                                =   $ib_guids.Matches[0].Groups[1].Value
+
+        log_w "IB guid is $ib_guid"
+        $global:srv_ib                          =   "--infobase $ib_guid $db_auth $srv"
+        return $global:srv_ib
+    } catch {
+        log_w "get infobase guid error $_"
+        exit(1)
+    }
 }
 
 function main{
@@ -352,10 +557,40 @@ function main{
     # 1.1 Проверка обязательных параметров
     check4param $TargetBase                 '$TargetBase'
     check4param $TargetBaseServer           '$TargetBaseServer'
+    
     # здесь - путь к 1С
-    $run1c                                  =   detect_1c
-    $global:COM                             =   New-Object -ComObject "V83.COMConnector"
-    $conf_cfg                               =   $run1c -replace '"','' -replace "1CV8.EXE","conf\conf.cfg"
+    if(!$C1Files){
+        $run1c                              =   detect_1c
+        $rac                                =   $run1c -replace "1CV8.exe","rac.exe"
+    }else{
+        log_w "got $C1Files"
+        $C1Files                            =   $C1Files -replace "[""]+",""
+        $run1c                              =   "$C1Files\1CV8.exe"
+        $rac                                =   "$C1Files\rac.exe"
+    }
+    $run1c                                  =   $run1c.replace("\\","\")
+    $rac                                    =   $rac.replace("\\","\")
+    $conf_cfg                               =   ($run1c -replace '"','' -replace "1CV8.EXE","conf\conf.cfg").replace("\\","\")
+    if(!$UseRAServer){
+        $global:COM                         =   New-Object -ComObject "V83.COMConnector"
+        $global:lockfrom                    =   getDateString (get-date)
+        $lockfrom                           =   $global:lockfrom
+        $global:lockto                      =   getDateString (get-date).AddDays(1)
+        $lockto                             =   $global:lockto
+    }else{
+        $global:lockfrom                    =   getDateString (get-date) "T"
+        $lockfrom                           =   $global:lockfrom -replace "T"," "
+        $global:lockto                      =   getDateString (get-date).AddDays(1) "T"
+        $lockto                             =   $global:lockto -replace "T"," "        
+        $global:UseRAServer                 =   $UseRAServer
+        $global:sch_j_lock                  =   $false
+        #regular expressions
+        $global:rx_guid                     =   "\w{8}\-\w{4}\-\w{4}\-\w{4}\-\w{12}"
+        $global:rx_ib_guid_part             =   "($global:rx_guid)[^:]+\:\s*"
+        $global:rx_sesn_guid                =   "session[^:]+\:\s*($global:rx_guid)"
+        $global:rx_sspr_guids               =   "connection[^:]+\:\s*($global:rx_guid)[\S\s]+?process[^:]+\:\s*($global:rx_guid)"
+        $global:rx_infb_sch_j               =   "scheduled\-jobs\-deny[^:]+:\s*(on|off)"        
+    }
     $unsafeActionsApplied                   =   $false
     # 1.2 Установка необязательных параметров
     if(!$TargetBasePort){
@@ -368,17 +603,19 @@ function main{
     if(!$PermissionCode){
         $script:PermissionCode              =   Get-Random -Minimum 1000000 -Maximum 9999999
     }
-    chk4fileParam $WorkloadBeforeUpdatePath '$WorkloadBeforeUpdatePath'
-    chk4fileParam $WorkloadAfterUpdatePath  '$WorkloadAfterUpdatePath'
-    if(!$UpdateFromRepo){
-        $script:UpdateFromRepo              =   $false
-    }
+    chk4fileParam $WorkloadBeforeUpdatePath '$WorkloadBeforeUpdatePath' 'Обработка до выполнения'
+    chk4fileParam $WorkloadAfterUpdatePath  '$WorkloadAfterUpdatePath' 'Обработка после выполнения'
     # либо обновляем из хранилища, либо из файла
     if ($ApplyCFPath){
         chk4fileParam $ApplyCFPath              '$ApplyCFPath'
     }    
     # 1.3 Проверка наличия файлов осуществляется в chk4fileParam    
     log_w "Исполняемый файл 1С              =   $run1c"
+    if($UseRAServer -and $rac -and (chk4fileParam $rac 'RASClient')){
+        $global:rac                         =   $rac
+        log_w "Исполняемый файл 1С rac          =   $global:rac"        
+    }
+    log_w "Файл конфигурации 1С             =   $conf_cfg"
     log_w "Целевая база                     =   $TargetBase"
     log_w "Целевая база расположена         =   $TargetBaseServer`:$TargetBasePort"
     if(!$BaseUser){ 
@@ -410,18 +647,22 @@ function main{
             $ConfigurationRepositoryP       =   ""
         }
     }    
-    if(!$Extension){
-        if($ConfigurationRepositoryExtension){
-            $Extension                      =   " -Extension $ConfigurationRepositoryExtension"
-        }else{
-            $Extension                      =   ""
-        }        
-    }else{            
-        log_w("Работаем с расширением           =   " + $Extension)
+    if($ConfigurationRepositoryExtension){
+        $Extension                          =   " -Extension $ConfigurationRepositoryExtension"
+    }elseif($Extension){
         $Extension                          =   " -Extension $Extension"
+    }else{
+        $Extension                          =   ""
+    }
+    if($Extension){
+        log_w("Работаем с расширением           =   " + $Extension).Replace(" -Extension ","")
     }
 
     log_w "Код блокировки                   =   $PermissionCode"
+    if(!$LockMessage){
+        $lockMessage                        =   "База заблокирована для обновления"
+    }
+    $global:lockmessage                     =   "$lockmessage. Время блокировки: с $lockfrom по $lockto"    
     if($ApplyCFPath){
         log_w `
          "Путь к загружаемой конфигурации  =   $ApplyCFPath"                                       # боль, маленькая ф в UTF-8 файле ломает powershell
