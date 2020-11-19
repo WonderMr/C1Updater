@@ -15,7 +15,7 @@ Param(
         $Extension,                             # имя расширения хранилища конфигурации
         $ConfigurationRepositoryExtension,      # для совместимости        
         $UpdateByClientInTheEnd,                # /C ЗапуститьОбновлениеИнформационнойБазы
-        $UseRAServer,                           # Использовать не ком-соединение, а rac
+        $UseRAServer,                           # Использовать указанный RAS-сервер
         $LockMessage,                           # Сообщение, используемое для блокировки базы 1С
         $C1Files                                # Каталог для используемой версии 1С
     )
@@ -219,8 +219,10 @@ function GetScheduledJobsDeniedState{
                                                                         -rgig_user_name $BBBaseUser `
                                                                         -rgig_user_pass $BBBasePass
         $c_infb_info                            =   "infobase info $srv_ib"
-        try {    
+        try {
+            #log_w $c_infb_info
             $gsjds_ret                          =   (Invoke-Process -FilePath $global:rac -ArgumentList $c_infb_info)
+            log_w $gsjds_ret
             $sch_j_locks                        =   ($gsjds_ret[1] | Select-String -Pattern $global:rx_infb_sch_j)
             $sch_j_lock                         =   $sch_j_locks.Matches[0].Groups[1].Value
             log_w "Scheduled jobs lock state is $sch_j_lock"
@@ -511,7 +513,7 @@ function racGetClusterGUID($rgs_srv){
         $global:cluster_guid                    =   "--cluster $cluster $rgs_srv"
         return $global:cluster_guid
     } catch {
-        log_w "get cluster guid error $_"
+        log_w "get cluster guid error $_. Точно сервер RAS называется $rgs_srv?"
         exit(1)
     }
 }
@@ -523,7 +525,7 @@ function racGetInfobaseGUID{
         $rgig_user_pass
     )
     if($global:srv_ib){
-        return $global:srv_ib
+       return $global:srv_ib
     }
     if($rgig_user_name){
         $db_auth                                =   "--db-user ""$rgig_user_name"" --db-pwd ""$rgig_user_pass"""
@@ -540,8 +542,12 @@ function racGetInfobaseGUID{
         $ib_guids                               =   ($rgig_ret | Select-String -Pattern $global:rx_ib_guid)
         $ib_guid                                =   $ib_guids.Matches[0].Groups[1].Value
 
-        log_w "IB guid is $ib_guid"
+        #log_w "IB guid is $ib_guid"
+        #log_w "DBAuth is $db_auth"
+        #log_w "Srv = $srv"
         $global:srv_ib                          =   "--infobase $ib_guid $db_auth $srv"
+        #log_w "`$global:srv_ib = "
+        #log_w $global:srv_ib
         return $global:srv_ib
     } catch {
         log_w "get infobase guid error $_"
@@ -562,8 +568,7 @@ function main{
     if(!$C1Files){
         $run1c                              =   detect_1c
         $rac                                =   $run1c -replace "1CV8.exe","rac.exe"
-    }else{
-        log_w "got $C1Files"
+    }else{        
         $C1Files                            =   $C1Files -replace "[""]+",""
         $run1c                              =   "$C1Files\1CV8.exe"
         $rac                                =   "$C1Files\rac.exe"

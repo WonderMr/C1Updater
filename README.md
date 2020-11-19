@@ -29,6 +29,10 @@
   ConfigurationRepositoryP  # пароль пользователя хранилища конфигурации
   Extension                 # имя расширения хранилища конфигурации
   UpdateByClientInTheEnd    # /C ЗапуститьОбновлениеИнформационнойБазы
+  UseRAServer               # использовать RASserver с указанный именем и портом
+  LockMessage               # сообщение, используемое для блокировки базы 1С
+  C1Files                   # Каталог для используемой версии 1С
+
  ```
 ## Примеры запуска:
 Обновление базы basename на сервере serv конфигурацией из файла ApplyCFPath c:\1C\1cfv.cf под именем user с паролем pwd. База блокируется кодом 1, перед обновлением выполняется внешняя обработка отключения РИБ DistributedInfoBase_OFF.epf, после обновления - обработка c:\1C\DistributedInfoBase_ON.epf подключет РИБ
@@ -46,7 +50,10 @@
 -BaseUserPass pwd
 ```
 
-Обновление расширения repo_ext в базе targetbase на сервере targetserv из привязанного к базе хранилища tcp://server:port/repo_name под именем repo_user и паролем repo_pwd. После применения конфигурации запускаем БСПшные обработчики обновления в конфигурации.
+Обновление расширения repo_ext в базе targetbase на сервере targetserv из привязанного к базе хранилища tcp://server:port/repo_name под именем repo_user и паролем repo_pwd. 
+После применения конфигурации запускаем БСПшные обработчики обновления в конфигурации. 
+Используем RAS-сервер ras_host:port (вместо COM-соединения), указанную версию 1С и блокируем с сообщение "Ты не зайдёшь!"
+Для авторизации в базе используется доменная авторизация.
 ```
 powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBase targetbase ^
@@ -54,9 +61,16 @@ powershell -NoProfile -File c:\dev\C1Updater\C1Updater.ps1 ^
 -TargetBasePort 1541 ^
 -TargetBaseAgentPort 1540 ^
 -ApplyCFPath "c:\temp\1Cv8_demo.cf" ^
--ConfigurationRepositoryF tcp://server:port/repo_name
--ConfigurationRepositoryN repo_user
--ConfigurationRepositoryP repo_pwd
--Extension repo_ext
--UpdateByClientInTheEnd 1
+-ConfigurationRepositoryF tcp://server:port/repo_name ^
+-ConfigurationRepositoryN repo_user ^
+-ConfigurationRepositoryP repo_pwd ^
+-Extension repo_ext ^
+-UpdateByClientInTheEnd 1 ^
+-UseRAServer targetserv:port ^
+-LockMessage "Ты не зайдёшь!" ^
+-C1Files     "c:\program files\1Cv8\8.3.16.1148\bin"
+
+
 ```
+
+Важный момент - Операции, совершаемые RAS-сервером, осуществляются под УЗ RAS-сервера. Если вы завели его с авторизацией под системной учётной записью, то в базу вы можете не попасть.
