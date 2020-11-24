@@ -6,7 +6,7 @@ Param(
         $PermissionCode,                        # код разрешения доступа, если не указан, то устанавливается произвольный
         $ApplyCFPath,                           # путь к применяемому файлу конфигурации, если отсутствует, то просто применяем конфигурацию
         $WorkloadBeforeUpdatePath,              # имя обработки, выполняемой перед обновлением конфигурации. Если файла нет, пропускаем этап
-        $WorkloadAfterUpdatePath,               # имя обработки, выполняемой перед обновлением конфигурации. Если файла нет, пропускаем этап
+        $WorkloadAfterUpdatePath,               # имя обработки, выполняемой после обновления конфигурации. Если файла нет, пропускаем этап
         $BaseUser,                              # имя пользователя для подключения к базе
         $BaseUserPass,                          # пароль пользователя для подключения к базе
         $ConfigurationRepositoryF,              # адрес хранилища конфигурации
@@ -727,6 +727,7 @@ function main{
                                                 /UC$PermissionCode`
                                                 $auth`
                                                 /DisableStartupMessages`
+                                                /DisableStartupDialogs`
                                                 /Out`"$log1C_file`""
     $close_1c_workload                      =   (split-path $MyInvocation.PSCommandPath -Leaf)+".close1c.epf"
     $load_update_cfg                        =   "DESIGNER   $main_part /LoadCfg `"$ApplyCFPath`" $Extension /UpdateDBCfg" -replace "\s+"," "
