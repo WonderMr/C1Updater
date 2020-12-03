@@ -15,7 +15,7 @@ Param(
         $Extension,                             # имя расширения хранилища конфигурации
         $ConfigurationRepositoryExtension,      # для совместимости        
         $UpdateByClientInTheEnd,                # /C ЗапуститьОбновлениеИнформационнойБазы
-        $UseRAServer,                           # Использовать указанный RAS-сервер
+        $UseRAServer,                           # Использовать указанный ras-сервер
         $LockMessage,                           # Сообщение, используемое для блокировки базы 1С
         $C1Files                                # Каталог для используемой версии 1С
     )
@@ -219,8 +219,7 @@ function GetScheduledJobsDeniedState{
                                                                         -rgig_user_name $BBBaseUser `
                                                                         -rgig_user_pass $BBBasePass
         $c_infb_info                            =   "infobase info $srv_ib"
-        try {
-            #log_w $c_infb_info
+        try {    
             $gsjds_ret                          =   (Invoke-Process -FilePath $global:rac -ArgumentList $c_infb_info)
             log_w $gsjds_ret
             $sch_j_locks                        =   ($gsjds_ret[1] | Select-String -Pattern $global:rx_infb_sch_j)
@@ -261,8 +260,8 @@ function LockBaseByRac {
                                                                     -rgig_user_name $BBBaseUser `
                                                                     -rgig_user_pass $BBBasePass
     $c_infb_lock                            =   "infobase update `
-                                                --denied-from `""+($global:lockfrom -replace "T"," ")+"`" `
-                                                --denied-to   `""+($global:lockto   -replace "T"," ")+"`" `
+                                                --denied-from `"" +$global:lockfrom+"`" `
+                                                --denied-to   `"" +$global:lockto+"`" `
                                                 --denied-message ""$global:lockmessage""`
                                                 --permission-code  $BBpermissionCode`
                                                 --sessions-deny=on `
@@ -270,7 +269,7 @@ function LockBaseByRac {
                                                 $srv_ib" `
                                                 -replace "\s{2,}"," "
     $lbbr_ret                               =   Invoke-Process $Global:rac $c_infb_lock
-    log_w "Блокировка базы завершена: $lbbr_ret"
+    log_w "Блокировка базы завершена: $lbbr_ret"    
     return $lbbr_ret
 }
 function UnLockBaseByRac {
@@ -495,7 +494,7 @@ function getDateString($cd,$t=$null){
 }
 function racAuth ($r_user,$r_pass){    
     if($r_user){
-        return $db_auth                     =   " --db-user ""$r_user"" --db-pwd ""$r_pass"""
+        return $db_auth                     =   " --infobase-user ""$r_user"" --infobase-pwd ""$r_pass"""
     } else {
             return ""
     }
@@ -525,10 +524,10 @@ function racGetInfobaseGUID{
         $rgig_user_pass
     )
     if($global:srv_ib){
-       return $global:srv_ib
+        return $global:srv_ib
     }
     if($rgig_user_name){
-        $db_auth                                =   "--db-user ""$rgig_user_name"" --db-pwd ""$rgig_user_pass"""
+        $db_auth                                =   "--infobase-user ""$rgig_user_name"" --infobase-pwd ""$rgig_user_pass"""
     } else {
         $db_auth                                =   ""
     }
@@ -542,12 +541,8 @@ function racGetInfobaseGUID{
         $ib_guids                               =   ($rgig_ret | Select-String -Pattern $global:rx_ib_guid)
         $ib_guid                                =   $ib_guids.Matches[0].Groups[1].Value
 
-        #log_w "IB guid is $ib_guid"
-        #log_w "DBAuth is $db_auth"
-        #log_w "Srv = $srv"
+        log_w "IB guid is $ib_guid"
         $global:srv_ib                          =   "--infobase $ib_guid $db_auth $srv"
-        #log_w "`$global:srv_ib = "
-        #log_w $global:srv_ib
         return $global:srv_ib
     } catch {
         log_w "get infobase guid error $_"
@@ -568,7 +563,8 @@ function main{
     if(!$C1Files){
         $run1c                              =   detect_1c
         $rac                                =   $run1c -replace "1CV8.exe","rac.exe"
-    }else{        
+    }else{
+        log_w "got $C1Files"
         $C1Files                            =   $C1Files -replace "[""]+",""
         $run1c                              =   "$C1Files\1CV8.exe"
         $rac                                =   "$C1Files\rac.exe"
@@ -579,7 +575,7 @@ function main{
     if(!$UseRAServer){
         $global:COM                         =   New-Object -ComObject "V83.COMConnector"
         $global:lockfrom                    =   getDateString (get-date)
-        $lockfrom                           =   $global:lockfrom
+        $lockfrom                           =   $global:lockfrom        
         $global:lockto                      =   getDateString (get-date).AddDays(1)
         $lockto                             =   $global:lockto
     }else{
@@ -668,6 +664,7 @@ function main{
         $lockMessage                        =   "База заблокирована для обновления"
     }
     $global:lockmessage                     =   "$lockmessage. Время блокировки: с $lockfrom по $lockto"    
+    log_w $global:lockmessage
     if($ApplyCFPath){
         log_w `
          "Путь к загружаемой конфигурации  =   $ApplyCFPath"                                       # боль, маленькая ф в UTF-8 файле ломает powershell
@@ -680,12 +677,12 @@ function main{
         log_w `
           "Выполняем после обновлениея      =   $WorkloadAfterUpdatePath"                           #
     }
-    $ScheduledJobsDenied                    =   [bool](GetScheduledJobsDeniedState  -BBBase $TargetBase `
-                                                                                    -BBpermissionCode $PermissionCode  `
-                                                                                    -BBServer $TargetBaseServer `
-                                                                                    -BBAgentPort $TargetBaseAgentPort `
-                                                                                    -BBBaseUser $BaseUser `
-                                                                                    -BBBasePass $BaseUserPass)    
+    $ScheduledJobsDenied                    =   (GetScheduledJobsDeniedState    -BBBase $TargetBase `
+                                                                                -BBpermissionCode $PermissionCode  `
+                                                                                -BBServer $TargetBaseServer `
+                                                                                -BBAgentPort $TargetBaseAgentPort `
+                                                                                -BBBaseUser $BaseUser `
+                                                                                -BBBasePass $BaseUserPass)    
 
     log_w "Блокировка РЗ включена           =   $ScheduledJobsDenied"
     if($UpdateByClientInTheEnd){
@@ -703,6 +700,12 @@ function main{
                                                                 -BBBaseUser $BaseUser `
                                                                 -BBBasePass $BaseUserPass)                                                           
     log_w "Блокировка $TargetBase завершена. Результат выполнения - $ret"
+    GetScheduledJobsDeniedState             -BBBase $TargetBase `
+                                            -BBpermissionCode $PermissionCode  `
+                                            -BBServer $TargetBaseServer `
+                                            -BBAgentPort $TargetBaseAgentPort `
+                                            -BBBaseUser $BaseUser `
+                                            -BBBasePass $BaseUserPass
     if(!$ret){
         log_w "Я дико извиняюсь, но продолжать не стану/"
         Exit 12
@@ -787,6 +790,13 @@ function main{
                                                                     -BBBasePass $BaseUserPass,
                                                                     -BBUnlockJobs $ScheduledJobsDenied)
     log_w "Могут ли пользователя работать в  $TargetBase. Ответ - $ret"
+    GetScheduledJobsDeniedState             -BBBase $TargetBase `
+                                            -BBpermissionCode $PermissionCode  `
+                                            -BBServer $TargetBaseServer `
+                                            -BBAgentPort $TargetBaseAgentPort `
+                                            -BBBaseUser $BaseUser `
+                                            -BBBasePass $BaseUserPass
+
     Remove-Item -Path $log1C_file
     if($ret){
         log_w "Да! Я снова сделал это!"
